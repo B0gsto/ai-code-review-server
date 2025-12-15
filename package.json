@@ -1,0 +1,22 @@
+{
+  "name": "mcp-code-review-server",
+  "version": "1.0.0",
+  "private": true,
+  "description": "MCP server for AI-powered code correctness review via OpenRouter",
+  "workspaces": [
+    "packages/server",
+    "packages/web"
+  ],
+  "scripts": {
+    "dev": "npm run dev --workspaces --if-present",
+    "build": "npm run build --workspaces --if-present",
+    "start": "npm run start --workspace=packages/server",
+    "format": "prettier --write \"packages/**/*.{ts,tsx,json,css}\""
+  },
+  "devDependencies": {
+    "prettier": "^3.2.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
