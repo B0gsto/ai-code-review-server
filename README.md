@@ -55,6 +55,38 @@ open http://localhost:5173
 4. Paste your code or diff
 5. Click "Review Code"
 
+## MCP Integration (Claude Desktop)
+
+This server also works as an MCP server for Claude Desktop.
+
+### Setup
+
+1. Build the server:
+```bash
+npm run build --workspace=packages/server
+```
+
+2. Add to your Claude Desktop config (`~/.config/claude/claude_desktop_config.json`):
+```json
+{
+  "mcpServers": {
+    "code-review": {
+      "command": "node",
+      "args": ["/path/to/ai-code-review-server/packages/server/dist/mcp.js"]
+    }
+  }
+}
+```
+
+3. Restart Claude Desktop
+
+### Using the Tool
+
+In Claude, you can now ask:
+> "Review this code for correctness issues: [paste code]"
+
+Claude will use the `review_code` tool with your OpenRouter API key.
+
 ## API Endpoints
 
 | Endpoint | Method | Description |
