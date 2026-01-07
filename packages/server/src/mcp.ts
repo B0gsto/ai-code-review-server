@@ -1,7 +1,7 @@
 /**
  * MCP Server for code review.
  * Exposes the review_code tool via stdio transport.
- * Can be used with Claude Desktop and other MCP clients.
+ * Uses stored credentials from setup page or prompts user to configure.
  */
 
 import { Server } from '@modelcontextprotocol/sdk/server/index.js';
@@ -12,36 +12,31 @@ import {
 } from '@modelcontextprotocol/sdk/types.js';
 import { reviewCode } from './services/index.js';
 import { ReviewInputSchema } from './schemas/index.js';
+import { getCredentials, hasCredentials } from './credentials.js';
 import { logger } from './logger.js';
 
-// Tool definition for review_code
+const SETUP_URL = 'http://localhost:3000/setup';
+
+// Tool definition - no longer requires apiKey/model from user
 const REVIEW_TOOL = {
     name: 'review_code',
     description:
         'Analyze code for correctness, security, or performance issues. ' +
-        'Accepts diff, raw code, or PR content. Returns risk score and issues.',
+        'Accepts diff or raw code. Returns risk score and identified issues.',
     inputSchema: {
         type: 'object' as const,
         properties: {
-            apiKey: {
+            code: {
                 type: 'string',
-                description: 'OpenRouter API key',
-            },
-            model: {
-                type: 'string',
-                description: 'Model to use (e.g., anthropic/claude-3.5-sonnet)',
+                description: 'Code snippet to review',
             },
             diff: {
                 type: 'string',
                 description: 'Unified diff content',
             },
-            code: {
-                type: 'string',
-                description: 'Raw code snippet to review',
-            },
             languageHint: {
                 type: 'string',
-                description: 'Programming language (e.g., typescript)',
+                description: 'Programming language (e.g., typescript, python)',
             },
             fileName: {
                 type: 'string',
@@ -53,24 +48,14 @@ const REVIEW_TOOL = {
                 description: 'Review focus (default: correctness)',
             },
         },
-        required: ['apiKey', 'model'],
+        required: [],
     },
 };
 
-/**
- * Creates and starts the MCP server.
- */
 async function main() {
     const server = new Server(
-        {
-            name: 'ai-code-review',
-            version: '1.0.0',
-        },
-        {
-            capabilities: {
-                tools: {},
-            },
-        }
+        { name: 'ai-code-review', version: '1.0.0' },
+        { capabilities: { tools: {} } }
     );
 
     // List available tools
@@ -84,12 +69,36 @@ async function main() {
             throw new Error(`Unknown tool: ${request.params.name}`);
         }
 
-        const args = request.params.arguments;
+        // Check for stored credentials
+        if (!hasCredentials()) {
+            return {
+                content: [
+                    {
+                        type: 'text',
+                        text: `⚠️ API credentials not configured.\n\n` +
+                            `Please run the REST server and open: ${SETUP_URL}\n\n` +
+                            `1. Start server: npm run dev --workspace=packages/server\n` +
+                            `2. Open ${SETUP_URL} in browser\n` +
+                            `3. Enter your OpenRouter API key and select model\n` +
+                            `4. Try this tool again`,
+                    },
+                ],
+                isError: true,
+            };
+        }
+
+        const creds = getCredentials()!;
+        const args = request.params.arguments || {};
 
         // Validate input
         const parseResult = ReviewInputSchema.safeParse({
-            ...args,
-            ruleset: args?.ruleset || 'correctness',
+            apiKey: creds.apiKey,
+            model: creds.model,
+            code: args.code,
+            diff: args.diff,
+            languageHint: args.languageHint,
+            fileName: args.fileName,
+            ruleset: args.ruleset || 'correctness',
         });
 
         if (!parseResult.success) {
@@ -108,16 +117,33 @@ async function main() {
         }
 
         try {
-            logger.info({ model: parseResult.data.model }, 'MCP: Processing review');
+            logger.info({ model: creds.model }, 'MCP: Processing review');
             const result = await reviewCode(parseResult.data);
 
+            // Format output nicely
+            const output = [
+                `## Risk Score: ${result.risk_score}/100`,
+                '',
+                `**Summary:** ${result.summary}`,
+                '',
+            ];
+
+            if (result.issues.length > 0) {
+                output.push('### Issues Found:');
+                result.issues.forEach((issue, i) => {
+                    output.push(`${i + 1}. **[${issue.severity.toUpperCase()}]** ${issue.type}`);
+                    output.push(`   - ${issue.explanation}`);
+                    output.push(`   - Fix: ${issue.suggested_fix}`);
+                });
+            }
+
+            if (result.questions_for_human.length > 0) {
+                output.push('', '### Questions:');
+                result.questions_for_human.forEach((q) => output.push(`- ${q}`));
+            }
+
             return {
-                content: [
-                    {
-                        type: 'text',
-                        text: JSON.stringify(result, null, 2),
-                    },
-                ],
+                content: [{ type: 'text', text: output.join('\n') }],
             };
         } catch (error) {
             logger.error({ error: (error as Error).message }, 'MCP: Review failed');
@@ -125,9 +151,7 @@ async function main() {
                 content: [
                     {
                         type: 'text',
-                        text: JSON.stringify({
-                            error: (error as Error).message,
-                        }),
+                        text: `Error: ${(error as Error).message}`,
                     },
                 ],
                 isError: true,
@@ -135,10 +159,8 @@ async function main() {
         }
     });
 
-    // Start server with stdio transport
     const transport = new StdioServerTransport();
     await server.connect(transport);
-
     logger.info('MCP server started on stdio');
 }
 

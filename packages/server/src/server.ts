@@ -79,6 +79,24 @@ export function createServer() {
         res.end(await register.metrics());
     });
 
+    // Setup page for credentials
+    app.get('/setup', (_req, res) => {
+        res.sendFile('setup.html', { root: import.meta.dirname });
+    });
+
+    app.post('/setup', (req, res) => {
+        const { apiKey, model } = req.body;
+        if (!apiKey || !model) {
+            res.status(400).json({ error: 'apiKey and model required' });
+            return;
+        }
+        import('./credentials.js').then(({ setCredentials }) => {
+            setCredentials({ apiKey, model });
+            logger.info('Credentials saved via setup page');
+            res.json({ success: true });
+        });
+    });
+
     app.use('/review', reviewRouter);
 
     // --- Error Handler ---
